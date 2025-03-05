@@ -46,7 +46,7 @@ fn main() -> Result<()> {
     
     // Check if calendar data already exists
     if calendar_exists(year) {
-        println!("Calendar data for year {} already exists in data/calendar_{}.json", year, year);
+        println!("Calendar data for year {} already exists in ~/.local/share/orthoterm/data/calendar_{}.json", year, year);
         return Ok(());
     }
     
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
     
     // Save the complete year data
     save_yearly_calendar(year, &yearly_data)?;
-    println!("Calendar data saved to data/calendar_{}.json", year);
+    println!("Calendar data saved to ~/.local/share/orthoterm/data/calendar_{}.json", year);
     
     Ok(())
 }
