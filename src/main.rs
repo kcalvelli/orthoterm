@@ -5,13 +5,12 @@ mod json;
 
 use chrono::{Local, Datelike, NaiveDate};
 use anyhow::Result;
-use ::scraper::Html;
 use serde::Serialize;
 use std::env;
 
 use crate::calendar::fetch_calendar_content;
 use crate::types::OrthoCalendarData;
-use crate::json::{save_calendar_to_json, save_yearly_calendar};
+use crate::json::{save_yearly_calendar, calendar_exists};
 
 #[derive(Serialize)]
 struct CalendarData {
@@ -45,6 +44,12 @@ fn main() -> Result<()> {
         .and_then(|arg| arg.parse().ok())
         .unwrap_or_else(|| Local::now().year());
     
+    // Check if calendar data already exists
+    if calendar_exists(year) {
+        println!("Calendar data for year {} already exists in data/calendar_{}.json", year, year);
+        return Ok(());
+    }
+    
     println!("Fetching calendar data for year {}", year);
     
     let mut yearly_data = Vec::new();
@@ -74,7 +79,7 @@ fn main() -> Result<()> {
     
     // Save the complete year data
     save_yearly_calendar(year, &yearly_data)?;
-    println!("Calendar data saved to output/calendar_{}.json", year);
+    println!("Calendar data saved to data/calendar_{}.json", year);
     
     Ok(())
 }
