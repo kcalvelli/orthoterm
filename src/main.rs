@@ -4,13 +4,13 @@ mod types;
 
 use chrono::{Local, Datelike};
 use anyhow::Result;
-use scraper::Html;
+use ::scraper::Html;
 use serde::Serialize;
 use std::fs::File;
 use std::io::Write;
 
 use crate::calendar::fetch_calendar_content;
-use crate::types::CalendarData;
+use crate::types::OrthoCalendarData;
 
 #[derive(Serialize)]
 struct CalendarData {
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     let troparia_content = fetch_calendar_content(month, day, year, "trp")?;
     let scripture_content = fetch_calendar_content(month, day, year, "scripture")?;
     
-    let calendar_data = CalendarData {
+    let calendar_data = OrthoCalendarData {
         date: date_content[0].clone(),
         header: header_content[0].clone(),
         lives: lives_content,

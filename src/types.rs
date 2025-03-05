@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 #[derive(Serialize)]
-pub struct CalendarData {
+pub struct OrthoCalendarData {
     pub date: String,
     pub header: String,
     pub lives: Vec<String>,

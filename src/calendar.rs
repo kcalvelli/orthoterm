@@ -1,5 +1,4 @@
 use anyhow::Result;
-use scraper::{Html, Selector};
 use crate::scraper::strip_html_tags;
 
 pub fn fetch_calendar_content(month: u32, day: u32, year: i32, section: &str) -> Result<Vec<String>> {
@@ -23,8 +22,8 @@ pub fn fetch_calendar_content(month: u32, day: u32, year: i32, section: &str) ->
     
     match section {
         "trp" => {
-            let document = Html::parse_document(&response);
-            let selector = Selector::parse("p").unwrap();
+            let document = ::scraper::Html::parse_document(&response);
+            let selector = ::scraper::Selector::parse("p").unwrap();
             let troparia: Vec<String> = document.select(&selector)
                 .map(|element| strip_html_tags(&element.html()))
                 .filter(|s| !s.trim().is_empty())
