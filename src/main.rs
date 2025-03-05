@@ -1,96 +1,80 @@
+use chrono::{Local, Datelike};
 use anyhow::Result;
-use chrono::Local;
 use scraper::{Html, Selector};
-use serde::{Serialize, Deserialize};
 
-#[derive(Serialize)]
-struct CalendarDay {
-    date: String,
-    commemorations: Vec<String>,
-    fast_info: Option<String>,
-    readings: Vec<String>,
+
+
+fn strip_html_tags(html: &str) -> String {
+    // First, preserve line breaks
+    let html = html.replace("<br>", "\n\n")
+                   .replace("<BR>", "\n")
+                   .replace("<p>", "\n\n\n")
+                   .replace("</p>", "")
+                   .replace("<P>", "\n\n\n")
+                   .replace("</P>", "")
+                   .replace("&nbsp;", " ")
+                   .replace("<b>", "")
+                   .replace("</b>", "")
+                   .replace("<i>", "")
+                   .replace("</i>", "");
+    
+    let document = Html::parse_document(&html);
+    document.root_element()
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .lines()
+        .filter(|line| !line.trim().is_empty())  // Remove empty lines
+        .map(|line| line.trim())                 // Trim each line
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-#[derive(Deserialize)]
-struct DisplayData {
-    date: String,
-    commemorations: Vec<String>,
-}
-
-fn fetch_calendar_data() -> Result<CalendarDay> {
+fn fetch_calendar_content(month: u32, day: u32, year: i32, section: &str) -> Result<String> {
     let client = reqwest::blocking::Client::new();
     
-    // Get today's date
-    let today = Local::now();
-    let url = format!(
-        "http://holytrinityorthodox.com/calendar/calendar.php?month={}&year={}",
-        today.month(),
-        today.year()
+    // Build URL with all sections set to 0 by default
+    let mut url = format!(
+        "http://holytrinityorthodox.com/calendar/calendar.php?month={}&today={}&year={}&dt=0&header=0&lives=0&trp=0&scripture=0",
+        month, day, year
     );
-
-    // Fetch the page
-    let response = client.get(&url).send()?.text()?;
-    let document = Html::parse_document(&response);
-
-    // Create selectors
-    let date_selector = Selector::parse("td.calendar_cell").unwrap();
-    let commemoration_selector = Selector::parse("td.calendar_cell div.saint").unwrap();
-    let fast_selector = Selector::parse("td.calendar_cell div.fast").unwrap();
-    let readings_selector = Selector::parse("td.calendar_cell div.reading").unwrap();
-
-    // Find today's cell (this is simplified - you might need to adjust based on actual layout)
-    let today_date = today.day();
     
-    let mut calendar_day = CalendarDay {
-        date: today.format("%Y-%m-%d").to_string(),
-        commemorations: Vec::new(),
-        fast_info: None,
-        readings: Vec::new(),
+    // Set the requested section to 1
+    url = match section {
+        "dt" => url.replace("dt=0", "dt=1"),
+        "header" => url.replace("header=0", "header=1"),
+        "lives" => url.replace("lives=0", "lives=3"),
+        "trp" => url.replace("trp=0", "trp=1"),
+        "scripture" => url.replace("scripture=0", "scripture=1"),
+        _ => url,
     };
-
-    // Find the correct cell for today
-    for cell in document.select(&date_selector) {
-        if let Some(date_text) = cell.text().next() {
-            if date_text.trim().parse::<u32>().ok() == Some(today_date) {
-                // Get commemorations
-                calendar_day.commemorations = cell
-                    .select(&commemoration_selector)
-                    .map(|element| element.text().collect::<String>())
-                    .collect();
-
-                // Get fast info
-                calendar_day.fast_info = cell
-                    .select(&fast_selector)
-                    .next()
-                    .map(|element| element.text().collect::<String>());
-
-                // Get readings
-                calendar_day.readings = cell
-                    .select(&readings_selector)
-                    .map(|element| element.text().collect::<String>())
-                    .collect();
-
-                break;
-            }
-        }
-    }
-
-    Ok(calendar_day)
+    
+    let response = client.get(&url).send()?.text()?;
+    Ok(strip_html_tags(&response))
 }
 
 fn main() -> Result<()> {
-    let calendar_data = fetch_calendar_data()?;
-    let json = serde_json::to_string_pretty(&calendar_data)?;
+    let today = Local::now();
+    let month = today.month();
+    let day = today.day();
+    let year = today.year();
     
-    // Parse the JSON into our DisplayData struct
-    let display_data: DisplayData = serde_json::from_str(&json)?;
+    // Fetch each section separately
+    let date_content = fetch_calendar_content(month, day, year, "dt")?;
+    println!("{}\n", date_content);
     
-    // Print the date and commemorations
-    println!("{}", display_data.date);
-    for commemoration in display_data.commemorations {
-        println!("{}", commemoration);
-    }
-    println!();
+    let header_content = fetch_calendar_content(month, day, year, "header")?;
+    println!("{}\n", header_content);
+    
+    let lives_content = fetch_calendar_content(month, day, year, "lives")?;
+    println!("{}\n", lives_content);
+    
+    let troparia_content = fetch_calendar_content(month, day, year, "trp")?;
+    println!("{}\n", troparia_content);
+    
+    let scripture_content = fetch_calendar_content(month, day, year, "scripture")?;
+    println!("{}\n", scripture_content);
     
     Ok(())
 }
+
