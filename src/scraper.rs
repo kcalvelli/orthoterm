@@ -1,8 +1,6 @@
-use scraper::Html;
 use reqwest::ClientBuilder;
-use std::time::Duration;
-use std::{thread, time};
 use anyhow::Result;
+use std::{thread, time::Duration};
 
 /// Strips HTML tags from a string and normalizes whitespace
 ///
@@ -18,55 +16,65 @@ use anyhow::Result;
 /// let text = strip_html_tags(html);
 /// assert_eq!(text, "Hello World!");
 /// ```
-pub fn strip_html_tags(html: &str) -> String {
-    // Parse the HTML document
-    let document = Html::parse_document(html);
+pub fn strip_html_tags(text: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
     
-    // Extract text content and normalize whitespace
-    document.root_element()
-        .text()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
+    for c in text.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+    
+    result.trim().to_string()
 }
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_RETRIES: u32 = 3;
-const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(5); // Start with 5 second delay
+const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(10);
 
+#[allow(dead_code)]
 pub async fn fetch_page(url: &str) -> Result<String> {
     let client = ClientBuilder::new()
         .timeout(REQUEST_TIMEOUT)
         .build()?;
     
     let mut attempts = 0;
-    let mut last_error = None;
-    
-    while attempts < MAX_RETRIES {
+    loop {
         match client.get(url).send().await {
             Ok(response) => {
-                return Ok(response.text().await?);
+                match response.text().await {
+                    Ok(text) => return Ok(text),
+                    Err(e) => {
+                        attempts += 1;
+                        println!("Failed to read response text: {}. Attempt {}", e, attempts);
+                    }
+                }
             }
             Err(e) => {
                 attempts += 1;
-                last_error = Some(e);
+                let is_timeout = matches!(e.status(), None) && e.is_timeout();
+                println!("Request failed ({}): {}. Attempt {}", 
+                    if is_timeout { "timeout" } else { "error" },
+                    e,
+                    attempts
+                );
                 
-                if attempts < MAX_RETRIES {
-                    let delay = INITIAL_RETRY_DELAY * (2_u32.pow(attempts - 1));
-                    println!("Request failed, retrying in {} seconds...", delay.as_secs());
+                // For timeouts or server errors, keep retrying indefinitely
+                if is_timeout || e.status().map_or(false, |s| s.is_server_error()) {
+                    let delay = INITIAL_RETRY_DELAY * (2_u32.pow(attempts.min(5) - 1));
+                    println!("Retrying in {} seconds...", delay.as_secs());
                     thread::sleep(delay);
+                    continue;
                 }
+                
+                // For other errors (like 404), return error immediately
+                return Err(anyhow::anyhow!("Request failed: {}", e));
             }
         }
     }
-    
-    Err(anyhow::anyhow!("Failed after {} attempts. Last error: {}", 
-        MAX_RETRIES, 
-        last_error.unwrap()))
 }
 
 #[cfg(test)]

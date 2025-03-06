@@ -1,33 +1,50 @@
 use std::fs;
 use std::path::PathBuf;
-use anyhow::{Result, anyhow, Context};
-use directories::ProjectDirs;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use chrono::NaiveDate;
+use regex::Regex;
+use dirs;
 
 /// Represents a single day's worth of Orthodox calendar data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OrthoCalendarData {
-    /// The date in both Gregorian and Julian calendars (e.g., "Sunday January 1, 2024/December 19, 2023")
-    pub date: String,
-    
-    /// The first part of the header (e.g., "The Holy Martyr Boniface")
-    pub summary: String,
-    
-    /// The remainder of the header (e.g., "Tone 4. By Monastic Charter: Food with Oil")
-    pub header_details: String,
-    
-    /// Vector of saints' lives and commemorations for the day
+    pub date: String,         // YYYY-MM-DD format for sorting
+    pub julian_date: String,  // Julian calendar date
+    pub summary: String,      // Main feast day information
+    pub liturgical_notes: String, // Fasting rules, tone, and other liturgical details
     pub lives: Vec<String>,
-    
-    /// Vector of troparia (hymns) for the day
     pub troparia: Vec<String>,
-    
-    /// Vector of scripture readings for the day
     pub scripture: Vec<String>,
 }
 
-/// Splits a header into summary and details parts based on specific keywords
+impl OrthoCalendarData {
+    pub fn new(
+        gregorian_date: String,
+        julian_date: String,
+        summary: String,
+        liturgical_notes: String,
+        lives: Vec<String>,
+        troparia: Vec<String>,
+        scripture: Vec<String>,
+    ) -> Result<Self> {
+        // Parse the Gregorian date for sorting
+        let parsed_date = parse_date(&gregorian_date)?;
+        let date = parsed_date.format("%Y-%m-%d").to_string();
+        
+        Ok(Self {
+            date,
+            julian_date,
+            summary,
+            liturgical_notes,
+            lives,
+            troparia,
+            scripture,
+        })
+    }
+}
+
 fn split_header(header: &str) -> (String, String) {
     // Try splitting on various possible separators in order of precedence
     if let Some((first, rest)) = header.split_once(" Tone") {
@@ -59,88 +76,89 @@ fn split_header(header: &str) -> (String, String) {
     (header.to_string(), String::new())
 }
 
+fn format_ordinal_suffixes(text: &str) -> String {
+    let patterns = [
+        (r"(\d+) st", "${1}st"),
+        (r"(\d+) nd", "${1}nd"),
+        (r"(\d+) rd", "${1}rd"),
+        (r"(\d+) th", "${1}th"),
+    ];
+    
+    let mut result = text.to_string();
+    for (pattern, replacement) in patterns {
+        let regex = Regex::new(pattern).unwrap();
+        result = regex.replace_all(&result, replacement).to_string();
+    }
+    result
+}
+
 /// Creates a new OrthoCalendarData instance with properly split header information
 pub fn create_calendar_data(
-    date: String,
+    gregorian_date: String,
+    julian_date: String,
     header: String,
     lives: Vec<String>,
     troparia: Vec<String>,
     scripture: Vec<String>,
-) -> OrthoCalendarData {
-    let (summary, header_details) = split_header(&header);
+) -> Result<OrthoCalendarData> {
+    let (summary, liturgical_notes) = split_header(&header);
+    let formatted_summary = format_ordinal_suffixes(&summary);
     
-    OrthoCalendarData {
-        date,
-        summary,
-        header_details,
-        lives,
-        troparia,
-        scripture,
-    }
-}
-
-fn get_data_dir() -> Result<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "orthoterm", "orthoterm")
-        .ok_or_else(|| anyhow!("Could not determine project directories"))?;
+    // Clean up newlines from all strings
+    let clean_lives = lives.into_iter().map(|s| s.replace('\n', " ").trim().to_string()).collect();
+    let clean_troparia = troparia.into_iter().map(|s| s.replace('\n', " ").trim().to_string()).collect();
+    let clean_scripture = scripture.into_iter().map(|s| s.replace('\n', " ").trim().to_string()).collect();
     
-    let data_dir = proj_dirs.data_dir().join("data");
-    fs::create_dir_all(&data_dir)?;
-    Ok(data_dir)
+    OrthoCalendarData::new(
+        gregorian_date,
+        julian_date,
+        formatted_summary.replace('\n', " ").trim().to_string(),
+        liturgical_notes.replace('\n', " ").trim().to_string(),
+        clean_lives,
+        clean_troparia,
+        clean_scripture,
+    )
 }
 
-#[allow(dead_code)]
-pub fn save_calendar_to_json(data: &OrthoCalendarData, year: i32, month: u32, day: u32) -> Result<()> {
-    let json_string = serde_json::to_string_pretty(&data)?;
-    let filename = format!("calendar_{:04}-{:02}-{:02}.json", year, month, day);
-    fs::write(filename, json_string)?;
-    Ok(())
+pub fn get_data_dir() -> PathBuf {
+    let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("orthoterm");
+    path.push("data");
+    fs::create_dir_all(&path).unwrap_or_default();
+    path
 }
 
-/// Saves calendar data for an entire year to a JSON file
-pub fn save_yearly_calendar(year: i32, data: &[OrthoCalendarData]) -> Result<()> {
-    if !(1900..=2100).contains(&year) {
-        anyhow::bail!("Year {} is out of supported range", year);
-    }
-    
-    let json_dir = get_data_dir()?;
-    let filename = json_dir.join(format!("calendar_{}.json", year));
-    let json = serde_json::to_string_pretty(data)
-        .context("Failed to serialize calendar data")?;
-    fs::write(&filename, json)
-        .with_context(|| format!("Failed to write calendar data to {}", filename.display()))?;
-    Ok(())
+pub fn get_calendar_path(year: i32) -> PathBuf {
+    let mut path = get_data_dir();
+    path.push(format!("calendar_{}.json", year));
+    path
 }
 
-/// Checks if calendar data exists for the specified year
 pub fn calendar_exists(year: i32) -> bool {
-    if !(1900..=2100).contains(&year) {
-        return false;
-    }
-    
-    if let Ok(data_dir) = get_data_dir() {
-        let filename = data_dir.join(format!("calendar_{}.json", year));
-        filename.exists()
-    } else {
-        false
-    }
+    get_calendar_path(year).exists()
 }
 
-/// Loads calendar data for the specified year from JSON
 pub fn load_calendar(year: i32) -> Result<Vec<OrthoCalendarData>> {
-    if !(1900..=2100).contains(&year) {
-        anyhow::bail!("Year {} is out of supported range", year);
+    let path = get_calendar_path(year);
+    let contents = fs::read_to_string(path)?;
+    let calendar: Vec<OrthoCalendarData> = serde_json::from_str(&contents)?;
+    Ok(calendar)
+}
+
+pub fn save_yearly_calendar(year: i32, data: &[OrthoCalendarData]) -> Result<()> {
+    let path = get_calendar_path(year);
+    let json = serde_json::to_string_pretty(data)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
+pub fn parse_date(date_str: &str) -> Result<NaiveDate> {
+    // Try parsing with non-padded day format
+    if let Ok(date) = NaiveDate::parse_from_str(date_str, "%B %-d, %Y") {
+        return Ok(date);
     }
-    
-    let data_dir = get_data_dir()?;
-    let filename = data_dir.join(format!("calendar_{}.json", year));
-    
-    if !filename.exists() {
-        return Err(anyhow!("Calendar data for year {} does not exist", year));
-    }
-    
-    let json_string = fs::read_to_string(filename)?;
-    let data: Vec<OrthoCalendarData> = serde_json::from_str(&json_string)?;
-    Ok(data)
+
+    Err(anyhow::anyhow!("Could not parse date: {}", date_str))
 }
 
 #[cfg(test)]
@@ -151,8 +169,9 @@ mod tests {
     fn test_has_content() {
         let empty = OrthoCalendarData {
             date: String::new(),
+            julian_date: String::new(),
             summary: String::new(),
-            header_details: String::new(),
+            liturgical_notes: String::new(),
             lives: vec![],
             troparia: vec![],
             scripture: vec![],
@@ -161,8 +180,9 @@ mod tests {
 
         let with_content = OrthoCalendarData {
             date: String::new(),
+            julian_date: String::new(),
             summary: "Test".to_string(),
-            header_details: String::new(),
+            liturgical_notes: String::new(),
             lives: vec![],
             troparia: vec![],
             scripture: vec![],
@@ -174,14 +194,15 @@ mod tests {
     fn test_date_parsing() {
         let data = OrthoCalendarData {
             date: "Sunday January 1, 2024/December 19, 2023".to_string(),
+            julian_date: "Sunday January 1, 2024/December 19, 2023".to_string(),
             summary: String::new(),
-            header_details: String::new(),
+            liturgical_notes: String::new(),
             lives: vec![],
             troparia: vec![],
             scripture: vec![],
         };
 
         assert_eq!(data.gregorian_date(), Some("Sunday January 1, 2024"));
-        assert_eq!(data.julian_date(), Some("December 19, 2023"));
+        assert_eq!(data.julian_date(), Some("Sunday January 1, 2024/December 19, 2023"));
     }
 } 
