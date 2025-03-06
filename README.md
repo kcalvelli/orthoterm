@@ -28,11 +28,7 @@ Please note that this tool respects the source website by:
 
 ### Using Nix
 
-If you have the Nix package manager installed with flakes enabled:
-
-```bash
-nix profile install github:yourusername/orthoterm
-```
+TODO: Add Nix installation instructions
 
 ### From Source
 
