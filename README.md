@@ -99,12 +99,6 @@ cargo build
 cargo run
 ```
 
-### Running Tests
-
-```bash
-cargo test
-```
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
