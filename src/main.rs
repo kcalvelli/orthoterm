@@ -2,24 +2,16 @@ mod calendar;
 mod scraper;
 mod types;
 mod json;
+mod ical;
 
 use chrono::{Local, Datelike, NaiveDate};
 use anyhow::Result;
-use serde::Serialize;
 use std::env;
 
 use crate::calendar::fetch_calendar_content;
 use crate::types::OrthoCalendarData;
-use crate::json::{save_yearly_calendar, calendar_exists};
-
-#[derive(Serialize)]
-struct CalendarData {
-    date: String,
-    header: String,
-    lives: Vec<String>,
-    troparia: Vec<String>,
-    scripture: Vec<String>,
-}
+use crate::json::{save_yearly_calendar, calendar_exists, load_calendar};
+use crate::ical::{generate_ical, ical_exists};
 
 fn fetch_day(year: i32, month: u32, day: u32) -> Result<OrthoCalendarData> {
     let date_content = fetch_calendar_content(month, day, year, "dt")?;
@@ -37,24 +29,10 @@ fn fetch_day(year: i32, month: u32, day: u32) -> Result<OrthoCalendarData> {
     })
 }
 
-fn main() -> Result<()> {
-    // Get year from command line argument or use current year
-    let year = env::args()
-        .nth(1)
-        .and_then(|arg| arg.parse().ok())
-        .unwrap_or_else(|| Local::now().year());
-    
-    // Check if calendar data already exists
-    if calendar_exists(year) {
-        println!("Calendar data for year {} already exists in ~/.local/share/orthoterm/data/calendar_{}.json", year, year);
-        return Ok(());
-    }
-    
+fn fetch_year_data(year: i32) -> Result<Vec<OrthoCalendarData>> {
     println!("Fetching calendar data for year {}", year);
     
     let mut yearly_data = Vec::new();
-    
-    // Iterate through each day of the year
     let start_date = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let end_date = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let mut current_date = start_date;
@@ -70,16 +48,54 @@ fn main() -> Result<()> {
         
         yearly_data.push(calendar_data);
         
-        // Move to next day
         current_date = current_date.succ_opt().unwrap();
-        
-        // Add a small delay to be nice to the server
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     
-    // Save the complete year data
-    save_yearly_calendar(year, &yearly_data)?;
-    println!("Calendar data saved to ~/.local/share/orthoterm/data/calendar_{}.json", year);
+    Ok(yearly_data)
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    let mut generate_ical_file = false;
+    let mut year = Local::now().year();
+    
+    // Parse arguments
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-i" => generate_ical_file = true,
+            year_arg => {
+                if let Ok(y) = year_arg.parse() {
+                    year = y;
+                }
+            }
+        }
+        i += 1;
+    }
+    
+    let json_exists = calendar_exists(year);
+    let ical_exists = ical_exists(year);
+    
+    let yearly_data = if json_exists {
+        // Load existing JSON data
+        println!("Loading existing calendar data for year {}", year);
+        load_calendar(year)?
+    } else {
+        // Fetch new data
+        let data = fetch_year_data(year)?;
+        save_yearly_calendar(year, &data)?;
+        println!("Calendar data saved to ~/.local/share/orthoterm/data/calendar_{}.json", year);
+        data
+    };
+    
+    if generate_ical_file && !ical_exists {
+        // Generate iCal from data
+        generate_ical(year, &yearly_data)?;
+        println!("iCal data saved to ~/.local/share/orthoterm/ical/calendar_{}.ics", year);
+    } else if generate_ical_file && ical_exists {
+        println!("iCal data for year {} already exists in ~/.local/share/orthoterm/ical/calendar_{}.ics", year, year);
+    }
     
     Ok(())
 }

@@ -13,6 +13,7 @@ fn get_data_dir() -> Result<PathBuf> {
     Ok(data_dir)
 }
 
+#[allow(dead_code)]
 pub fn save_calendar_to_json(data: &OrthoCalendarData, year: i32, month: u32, day: u32) -> Result<()> {
     let json_string = serde_json::to_string_pretty(&data)?;
     let filename = format!("calendar_{:04}-{:02}-{:02}.json", year, month, day);
@@ -41,4 +42,17 @@ pub fn calendar_exists(year: i32) -> bool {
     } else {
         false
     }
+}
+
+pub fn load_calendar(year: i32) -> Result<Vec<OrthoCalendarData>> {
+    let data_dir = get_data_dir()?;
+    let filename = data_dir.join(format!("calendar_{}.json", year));
+    
+    if !filename.exists() {
+        return Err(anyhow!("Calendar data for year {} does not exist", year));
+    }
+    
+    let json_string = fs::read_to_string(filename)?;
+    let data: Vec<OrthoCalendarData> = serde_json::from_str(&json_string)?;
+    Ok(data)
 } 
